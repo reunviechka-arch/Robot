@@ -1,0 +1,1069 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Studio — 8-Channel USB LED Controller</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <script>
+        // Early theme initialization to prevent Flash of Unstyled Content (FOUC)
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        obsidian: '#0B0F19',
+                        surface: '#111827',
+                        surfaceLight: '#1E293B',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        /* Light Theme Background */
+        body {
+            background-color: #F8FAFC;
+            background-image: 
+                radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.15) 0%, transparent 50%),
+                linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+            background-size: 100% 100%, 32px 32px, 32px 32px;
+            color: #0F172A;
+            overflow-x: hidden;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        /* Dark Theme Background */
+        html.dark body {
+            background-color: #0B0F19;
+            background-image: 
+                radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.06) 0%, transparent 50%),
+                linear-gradient(to right, rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+            color: #F8FAFC;
+        }
+
+        /* Glassmorphic Hardware Card - Light */
+        .hw-card {
+            background: linear-gradient(165deg, rgba(255, 255, 255, 0.95) 0%, rgba(241, 245, 249, 0.95) 100%);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.08), inset 0 1px 0 0 rgba(255, 255, 255, 1);
+            transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+        }
+
+        /* Glassmorphic Hardware Card - Dark */
+        html.dark .hw-card {
+            background: linear-gradient(165deg, rgba(23, 32, 51, 0.85) 0%, rgba(13, 18, 30, 0.95) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7), inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+        }
+
+        .hw-card:hover {
+            transform: translateY(-2px);
+        }
+
+        /* Tactile Spring Toggle Switch */
+        .toggle-track {
+            width: 56px;
+            height: 30px;
+            border-radius: 9999px;
+            background: #E2E8F0;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05);
+            position: relative;
+            cursor: pointer;
+            transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        html.dark .toggle-track {
+            background: #090D16;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.85);
+        }
+
+        .toggle-thumb {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            background: linear-gradient(180deg, #FFFFFF 0%, #F1F5F9 100%);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 1);
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            transition: transform 0.38s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        html.dark .toggle-thumb {
+            background: linear-gradient(180deg, #94A3B8 0%, #64748B 100%);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.4);
+        }
+
+        .toggle-track.active .toggle-thumb {
+            transform: translateX(26px);
+            background: linear-gradient(180deg, #FFFFFF 0%, #E2E8F0 100%);
+            box-shadow: 0 0 12px rgba(255, 255, 255, 0.9), 0 2px 4px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Realistic LED Bulb Animations */
+        @keyframes led-breathe {
+            0%, 100% { transform: scale(1); opacity: 0.85; }
+            50% { transform: scale(1.08); opacity: 1; }
+        }
+        @keyframes ray-pulse {
+            0%, 100% { opacity: 0.45; transform: scale(0.96); }
+            50% { opacity: 0.9; transform: scale(1.04); }
+        }
+
+        .led-ambient-halo {
+            transition: opacity 0.35s ease, transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+            opacity: 0;
+            transform: scale(0.65);
+        }
+        .led-active .led-ambient-halo {
+            opacity: 1;
+            animation: led-breathe 2.6s ease-in-out infinite;
+        }
+        .led-rays {
+            opacity: 0;
+            transform-origin: 60px 54px;
+            transition: opacity 0.25s ease;
+        }
+        .led-active .led-rays {
+            opacity: 1;
+            animation: ray-pulse 2s ease-in-out infinite;
+        }
+        .led-dome, .led-die, .led-inner-core {
+            transition: all 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        /* Custom Scrollbar */
+        .serial-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .serial-scroll::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.05);
+        }
+        html.dark .serial-scroll::-webkit-scrollbar-track {
+            background: rgba(11, 15, 25, 0.6);
+        }
+        .serial-scroll::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.4);
+            border-radius: 3px;
+        }
+        html.dark .serial-scroll::-webkit-scrollbar-thumb {
+            background: rgba(148, 163, 184, 0.2);
+        }
+        .serial-scroll::-webkit-scrollbar-thumb:hover {
+            background: rgba(148, 163, 184, 0.6);
+        }
+
+        /* Active Pattern */
+        .pattern-active {
+            background: rgba(56, 189, 248, 0.15) !important;
+            border-color: rgba(56, 189, 248, 0.6) !important;
+            color: #0284C7 !important;
+            box-shadow: 0 0 18px rgba(56, 189, 248, 0.2);
+        }
+        html.dark .pattern-active {
+            color: #38BDF8 !important;
+        }
+
+        /* SVG Theming Overrides via CSS */
+        .svg-board-substrate { fill: #E2E8F0; stroke: #CBD5E1; transition: fill 0.3s, stroke 0.3s; }
+        html.dark .svg-board-substrate { fill: #131A29; stroke: #334155; }
+        
+        .svg-silkscreen { stroke: rgba(0,0,0,0.06); transition: stroke 0.3s; }
+        html.dark .svg-silkscreen { stroke: rgba(255,255,255,0.06); }
+
+        .svg-chip { fill: #F1F5F9; stroke: #CBD5E1; transition: fill 0.3s, stroke 0.3s; }
+        html.dark .svg-chip { fill: #1E293B; stroke: #475569; }
+
+        .svg-antenna { fill: #E2E8F0; transition: fill 0.3s; }
+        html.dark .svg-antenna { fill: #0F172A; }
+        
+        .svg-text-primary { fill: #475569; transition: fill 0.3s; }
+        html.dark .svg-text-primary { fill: #94A3B8; }
+
+        .svg-text-secondary { fill: #64748B; transition: fill 0.3s; }
+        html.dark .svg-text-secondary { fill: #64748B; }
+        
+        .svg-btn { fill: #F8FAFC; stroke: #CBD5E1; transition: fill 0.3s, stroke 0.3s; }
+        html.dark .svg-btn { fill: #0F172A; stroke: #475569; }
+
+        .svg-pin { fill: #94A3B8; transition: fill 0.3s; }
+        html.dark .svg-pin { fill: #334155; }
+
+        .svg-usb { fill: #CBD5E1; stroke: #94A3B8; transition: fill 0.3s, stroke 0.3s; }
+        html.dark .svg-usb { fill: #94A3B8; stroke: #CBD5E1; }
+        
+        .esp-pin-led { transition: all 0.25s ease; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-sky-500/30 selection:text-sky-800 dark:selection:text-sky-200">
+
+    <!-- Top Navigation -->
+    <header class="sticky top-0 z-40 border-b border-black/[0.05] dark:border-white/[0.08] bg-white/85 dark:bg-[#0B0F19]/85 backdrop-blur-xl transition-colors">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+            
+            <!-- Brand & Hardware Target -->
+            <div class="flex items-center gap-3.5">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500/10 to-indigo-600/10 dark:from-sky-500/20 dark:to-indigo-600/20 border border-sky-400/20 dark:border-sky-400/30 flex items-center justify-center shadow-lg shadow-sky-500/10">
+                    <i data-lucide="cpu" class="w-5 h-5 text-sky-500 dark:text-sky-400"></i>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2.5">
+                        <h1 class="text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-white">ESP32 LED Studio</h1>
+                        <span class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-mono font-medium bg-slate-100 dark:bg-slate-800/90 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-white/10">
+                            DEVKIT V1 • 9600 BAUD
+                        </span>
+                    </div>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Web Serial USB Telemetry &amp; 8-Channel Diode Controller</p>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div class="flex flex-wrap items-center gap-2.5 sm:gap-3">
+                
+                <!-- Theme Toggle -->
+                <button onclick="toggleTheme()" class="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700 border border-slate-200 dark:border-white/10 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-white transition-all cursor-pointer shadow-sm" title="Toggle Light/Dark Mode">
+                    <i data-lucide="sun" class="w-4 h-4 hidden dark:block"></i>
+                    <i data-lucide="moon" class="w-4 h-4 block dark:hidden"></i>
+                </button>
+
+                <!-- Simulation Mode Switch -->
+                <div class="flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-900/90 border border-slate-200 dark:border-white/10 shadow-sm" title="Test live LED animations without physical hardware plugged in">
+                    <span class="text-xs font-medium text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                        <i data-lucide="sparkles" class="w-3.5 h-3.5 text-amber-500 dark:text-amber-400"></i>
+                        Demo Mode
+                    </span>
+                    <button id="demoModeBtn" type="button" role="switch" aria-checked="true" onclick="toggleDemoMode()" 
+                        class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-amber-500 transition-colors duration-200 ease-in-out focus:outline-none">
+                        <span id="demoModeKnob" class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out translate-x-4"></span>
+                    </button>
+                </div>
+
+                <!-- Sketch Modal -->
+                <button onclick="openSketchModal()" class="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-white/10 transition-all cursor-pointer shadow-sm">
+                    <i data-lucide="code-2" class="w-4 h-4 text-sky-500 dark:text-sky-400"></i>
+                    <span class="hidden md:inline">Arduino Sketch</span>
+                </button>
+
+                <!-- USB Connect -->
+                <button id="connectUsbBtn" onclick="handleUsbConnectionClick()" 
+                    class="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-sky-500 to-blue-600 hover:from-sky-400 hover:to-blue-500 shadow-lg shadow-sky-500/25 border border-sky-400/30 transition-all cursor-pointer active:scale-[0.98]">
+                    <i data-lucide="usb" class="w-4 h-4"></i>
+                    <span id="connectUsbText">Connect USB (ESP32)</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Status Sub-bar -->
+        <div class="bg-slate-50/70 dark:bg-slate-950/70 border-t border-black/[0.05] dark:border-white/[0.05] px-4 sm:px-6 lg:px-8 py-1.5 transition-colors">
+            <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono">
+                <div class="flex items-center gap-4">
+                    <span id="connectionBadge" class="inline-flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+                        <span id="connectionDot" class="w-2 h-2 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse"></span>
+                        <span id="connectionStatusLabel">SIMULATION MODE ACTIVE (VIRTUAL ESP32)</span>
+                    </span>
+                    <span id="webSerialSupportBadge" class="hidden sm:inline text-slate-500"></span>
+                </div>
+                <div class="flex items-center gap-4 text-slate-500 dark:text-slate-400">
+                    <span>ACTIVE CHANNELS: <strong id="activeCountLabel" class="text-slate-900 dark:text-white">0 / 8</strong></span>
+                    <span class="hidden sm:inline">PROTOCOL: <span class="text-slate-700 dark:text-slate-300">ASCII (\n)</span></span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none max-w-sm w-full px-4 sm:px-0"></div>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-6">
+
+        <!-- Master Command Deck -->
+        <section class="hw-card rounded-2xl p-4 sm:p-5 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-white/10 flex items-center justify-center shrink-0">
+                    <i data-lucide="sliders" class="w-4 h-4 text-sky-500 dark:text-sky-400"></i>
+                </div>
+                <div>
+                    <h2 class="text-sm font-semibold text-slate-900 dark:text-white">Master Bus &amp; Automated Light Shows</h2>
+                    <p class="text-xs text-slate-500 dark:text-slate-400">Broadcast synchronous states or stream live animated sequences over USB</p>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 sm:gap-2.5">
+                <button onclick="setAllLeds(true)" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-emerald-100 hover:bg-emerald-200 text-emerald-700 dark:bg-emerald-500/15 dark:hover:bg-emerald-500/25 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-500/30 transition-all cursor-pointer active:scale-95 shadow-sm">
+                    <i data-lucide="power" class="w-3.5 h-3.5"></i>
+                    All ON
+                </button>
+                <button onclick="setAllLeds(false)" class="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-rose-100 hover:bg-rose-200 text-rose-700 dark:bg-rose-500/15 dark:hover:bg-rose-500/25 dark:text-rose-300 border border-rose-300 dark:border-rose-500/30 transition-all cursor-pointer active:scale-95 shadow-sm">
+                    <i data-lucide="power-off" class="w-3.5 h-3.5"></i>
+                    All OFF
+                </button>
+
+                <div class="h-6 w-px bg-slate-200 dark:bg-white/10 hidden sm:block mx-0.5"></div>
+
+                <button id="pattern-knight" onclick="togglePattern('knight')" class="pattern-btn inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 transition-all cursor-pointer shadow-sm">
+                    <i data-lucide="activity" class="w-3.5 h-3.5 text-cyan-500 dark:text-cyan-400"></i>
+                    Knight Rider
+                </button>
+                <button id="pattern-pulse" onclick="togglePattern('pulse')" class="pattern-btn inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 transition-all cursor-pointer shadow-sm">
+                    <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-500 dark:text-amber-400"></i>
+                    Sync Pulse
+                </button>
+                <button id="pattern-sparkle" onclick="togglePattern('sparkle')" class="pattern-btn inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-white dark:bg-slate-800/80 hover:bg-slate-50 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-white/10 transition-all cursor-pointer shadow-sm">
+                    <i data-lucide="sparkles" class="w-3.5 h-3.5 text-purple-500 dark:text-purple-400"></i>
+                    Random Sparkle
+                </button>
+            </div>
+        </section>
+
+        <!-- 8 Individual LED Control Cards Grid -->
+        <section aria-label="LED Channel Controls">
+            <div id="ledCardsGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+                <!-- Rendered by JS -->
+            </div>
+        </section>
+
+        <!-- Bottom Telemetry Row -->
+        <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            <!-- ESP32 Pinout -->
+            <div class="lg:col-span-5 hw-card rounded-2xl p-5 flex flex-col justify-between">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h3 class="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                            <i data-lucide="circuit-board" class="w-4 h-4 text-sky-500 dark:text-sky-400"></i>
+                            ESP32 DevKit V1 Pinout
+                        </h3>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Use the 8 LED cards to toggle each GPIO output</p>
+                    </div>
+                    <span class="px-2 py-1 rounded-lg bg-slate-100 dark:bg-slate-900/90 border border-slate-200 dark:border-white/10 font-mono text-[11px] text-slate-600 dark:text-slate-300">
+                        3.3V LOGIC
+                    </span>
+                </div>
+
+                <div class="relative flex items-center justify-center py-2 select-none">
+                    <svg viewBox="0 0 340 310" class="w-full max-w-[330px] h-auto drop-shadow-xl dark:drop-shadow-2xl">
+                        <!-- PCB Substrate -->
+                        <rect x="75" y="16" width="190" height="278" rx="14" stroke-width="2" class="svg-board-substrate"/>
+                        <!-- Inner Silkscreen Outline -->
+                        <rect x="83" y="24" width="174" height="262" rx="10" fill="none" stroke-width="1" class="svg-silkscreen"/>
+                        
+                        <!-- ESP32-WROOM-32 RF Shield Module -->
+                        <rect x="108" y="34" width="124" height="118" rx="6" stroke-width="1.5" class="svg-chip"/>
+                        <!-- Antenna Trace Area -->
+                        <rect x="114" y="38" width="112" height="24" rx="3" class="svg-antenna"/>
+                        <path d="M124 54 V44 H136 V54 H148 V44 H160 V54 H172 V44 H184 V54 H196 V44 H212" fill="none" stroke="#D97706" stroke-width="2" stroke-linecap="round"/>
+                        <text x="170" y="92" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" class="svg-text-primary">ESP-WROOM-32</text>
+                        <text x="170" y="108" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8.5" class="svg-text-secondary">DEVKIT V1</text>
+
+                        <!-- EN & BOOT Buttons -->
+                        <rect x="114" y="218" width="22" height="26" rx="3" stroke-width="1" class="svg-btn"/>
+                        <circle cx="125" cy="231" r="6" class="svg-pin"/>
+                        <text x="125" y="254" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" class="svg-text-secondary">EN</text>
+
+                        <rect x="204" y="218" width="22" height="26" rx="3" stroke-width="1" class="svg-btn"/>
+                        <circle cx="215" cy="231" r="6" class="svg-pin"/>
+                        <text x="215" y="254" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" class="svg-text-secondary">BOOT</text>
+
+                        <!-- LEDs -->
+                        <circle cx="148" cy="231" r="3.5" fill="#EF4444" opacity="0.85"/>
+                        <text x="148" y="245" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" class="svg-text-secondary">PWR</text>
+                        <circle id="boardTxLed" cx="192" cy="231" r="3.5" class="svg-chip"/>
+                        <text x="192" y="245" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="7" class="svg-text-secondary">TX/RX</text>
+
+                        <!-- Micro-USB -->
+                        <rect x="146" y="274" width="48" height="24" rx="3" stroke-width="1.5" class="svg-usb"/>
+                        <rect x="152" y="278" width="36" height="14" rx="1.5" class="svg-pin"/>
+                        <text x="170" y="268" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="8" font-weight="600" class="svg-text-primary">USB SERIAL</text>
+
+                        <!-- Left Side Pins -->
+                        <g class="svg-pin" font-family="JetBrains Mono, monospace" font-size="9">
+                            <circle cx="88" cy="60" r="4"/><text x="98" y="63" class="svg-text-secondary">3V3</text>
+                            <circle cx="88" cy="86" r="4"/><text x="98" y="89" class="svg-text-secondary">GND</text>
+                            <circle cx="88" cy="112" r="4"/><text x="98" y="115" class="svg-text-secondary">D15</text>
+                            <circle cx="88" cy="138" r="4"/><text x="98" y="141" class="svg-text-secondary">D2</text>
+                            <circle cx="88" cy="164" r="4"/><text x="98" y="167" class="svg-text-secondary">D4</text>
+                            <circle cx="88" cy="190" r="4"/><text x="98" y="193" class="svg-text-secondary">RX2</text>
+                            <circle cx="88" cy="216" r="4"/><text x="98" y="219" class="svg-text-secondary">TX2</text>
+                            <circle cx="88" cy="242" r="4"/><text x="98" y="245" class="svg-text-secondary">VIN</text>
+                        </g>
+
+                        <!-- Right Side Active Pins -->
+                        <g class="cursor-pointer group" onclick="toggleLed(4)">
+                            <rect x="234" y="48" width="98" height="24" rx="6" fill="rgba(0,0,0,0.03)" class="dark:fill-white/[0.03] group-hover:fill-black/10 dark:group-hover:fill-white/10 transition-colors"/>
+                            <text x="238" y="63" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" class="fill-slate-600 dark:fill-slate-300">D23</text>
+                            <circle id="pin-dot-4" cx="252" cy="60" r="5.5" stroke-width="1.5" class="fill-slate-300 dark:fill-[#334155] stroke-slate-400 dark:stroke-[#64748B] esp-pin-led"/>
+                            <line x1="258" y1="60" x2="274" y2="60" stroke-width="1.5" stroke-dasharray="2 2" class="stroke-slate-300 dark:stroke-[#475569]"/>
+                            <text id="pin-label-4" x="278" y="63" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" class="fill-slate-500 dark:fill-slate-400 esp-pin-led">LED 5</text>
+                        </g>
+
+                        <g class="cursor-pointer group" onclick="toggleLed(3)">
+                            <rect x="234" y="82" width="98" height="24" rx="6" fill="rgba(0,0,0,0.03)" class="dark:fill-white/[0.03] group-hover:fill-black/10 dark:group-hover:fill-white/10 transition-colors"/>
+                            <text x="238" y="97" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" class="fill-slate-600 dark:fill-slate-300">D22</text>
+                            <circle id="pin-dot-3" cx="252" cy="94" r="5.5" stroke-width="1.5" class="fill-slate-300 dark:fill-[#334155] stroke-slate-400 dark:stroke-[#64748B] esp-pin-led"/>
+                            <line x1="258" y1="94" x2="274" y2="94" stroke-width="1.5" stroke-dasharray="2 2" class="stroke-slate-300 dark:stroke-[#475569]"/>
+                            <text id="pin-label-3" x="278" y="97" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" class="fill-slate-500 dark:fill-slate-400 esp-pin-led">LED 4</text>
+                        </g>
+
+                        <!-- GND -->
+                        <text x="238" y="128" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="9" class="svg-text-secondary">GND</text>
+                        <circle cx="252" cy="125" r="4" stroke-width="1" class="fill-slate-300 dark:fill-[#1E293B] stroke-slate-400 dark:stroke-[#475569]"/>
+
+                        <g class="cursor-pointer group" onclick="toggleLed(2)">
+                            <rect x="234" y="144" width="98" height="24" rx="6" fill="rgba(0,0,0,0.03)" class="dark:fill-white/[0.03] group-hover:fill-black/10 dark:group-hover:fill-white/10 transition-colors"/>
+                            <text x="238" y="159" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" class="fill-slate-600 dark:fill-slate-300">D21</text>
+                            <circle id="pin-dot-2" cx="252" cy="156" r="5.5" stroke-width="1.5" class="fill-slate-300 dark:fill-[#334155] stroke-slate-400 dark:stroke-[#64748B] esp-pin-led"/>
+                            <line x1="258" y1="156" x2="274" y2="156" stroke-width="1.5" stroke-dasharray="2 2" class="stroke-slate-300 dark:stroke-[#475569]"/>
+                            <text id="pin-label-2" x="278" y="159" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" class="fill-slate-500 dark:fill-slate-400 esp-pin-led">LED 3</text>
+                        </g>
+
+                        <g class="cursor-pointer group" onclick="toggleLed(1)">
+                            <rect x="234" y="178" width="98" height="24" rx="6" fill="rgba(0,0,0,0.03)" class="dark:fill-white/[0.03] group-hover:fill-black/10 dark:group-hover:fill-white/10 transition-colors"/>
+                            <text x="238" y="193" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" class="fill-slate-600 dark:fill-slate-300">D19</text>
+                            <circle id="pin-dot-1" cx="252" cy="190" r="5.5" stroke-width="1.5" class="fill-slate-300 dark:fill-[#334155] stroke-slate-400 dark:stroke-[#64748B] esp-pin-led"/>
+                            <line x1="258" y1="190" x2="274" y2="190" stroke-width="1.5" stroke-dasharray="2 2" class="stroke-slate-300 dark:stroke-[#475569]"/>
+                            <text id="pin-label-1" x="278" y="193" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" class="fill-slate-500 dark:fill-slate-400 esp-pin-led">LED 2</text>
+                        </g>
+
+                        <g class="cursor-pointer group" onclick="toggleLed(0)">
+                            <rect x="234" y="212" width="98" height="24" rx="6" fill="rgba(0,0,0,0.03)" class="dark:fill-white/[0.03] group-hover:fill-black/10 dark:group-hover:fill-white/10 transition-colors"/>
+                            <text x="238" y="227" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" class="fill-slate-600 dark:fill-slate-300">D18</text>
+                            <circle id="pin-dot-0" cx="252" cy="224" r="5.5" stroke-width="1.5" class="fill-slate-300 dark:fill-[#334155] stroke-slate-400 dark:stroke-[#64748B] esp-pin-led"/>
+                            <line x1="258" y1="224" x2="274" y2="224" stroke-width="1.5" stroke-dasharray="2 2" class="stroke-slate-300 dark:stroke-[#475569]"/>
+                            <text id="pin-label-0" x="278" y="227" font-family="JetBrains Mono, monospace" font-size="9.5" font-weight="600" class="fill-slate-500 dark:fill-slate-400 esp-pin-led">LED 1</text>
+                        </g>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- Serial Console -->
+            <div class="lg:col-span-7 hw-card rounded-2xl p-5 flex flex-col">
+                <div class="flex flex-wrap items-center justify-between gap-2 mb-3.5">
+                    <div>
+                        <h3 class="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                            <i data-lucide="terminal" class="w-4 h-4 text-emerald-600 dark:text-emerald-400"></i>
+                            Live USB Serial Monitor
+                        </h3>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Real-time TX/RX ASCII telemetry stream at 9600 bps</p>
+                    </div>
+                    <button onclick="clearSerialLogs()" class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800/80 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-white/10 transition-colors cursor-pointer shadow-sm">
+                        <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+                        Clear
+                    </button>
+                </div>
+
+                <div id="serialConsoleOutput" class="serial-scroll flex-1 min-h-[235px] max-h-[260px] overflow-y-auto rounded-xl bg-slate-50 dark:bg-[#070A11] border border-slate-200 dark:border-white/[0.08] p-3.5 font-mono text-xs space-y-1.5 shadow-inner transition-colors">
+                </div>
+
+                <form onsubmit="handleManualCommandSubmit(event)" class="mt-3 flex items-center gap-2">
+                    <div class="relative flex-1">
+                        <span class="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-xs text-sky-500 dark:text-sky-400 font-semibold">&gt;</span>
+                        <input id="manualSerialInput" type="text" placeholder="Send raw command (e.g. L1 ON, L3 OFF)..." autocomplete="off"
+                            class="w-full pl-7 pr-3 py-2 rounded-xl bg-white dark:bg-[#070A11] border border-slate-200 dark:border-white/10 focus:border-sky-500/60 focus:outline-none font-mono text-xs text-slate-900 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 shadow-sm transition-colors">
+                    </div>
+                    <button type="submit" class="px-4 py-2 rounded-xl bg-sky-100 dark:bg-sky-500/20 hover:bg-sky-200 dark:hover:bg-sky-500/30 text-sky-700 dark:text-sky-300 border border-sky-300 dark:border-sky-500/30 font-mono text-xs font-semibold transition-colors cursor-pointer shadow-sm">
+                        SEND TX
+                    </button>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <!-- Arduino Firmware Modal -->
+    <div id="sketchModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-slate-900/50 dark:bg-black/75 backdrop-blur-sm p-4">
+        <div class="hw-card rounded-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 dark:border-white/15 shadow-2xl">
+            <div class="px-5 py-4 border-b border-slate-200 dark:border-white/10 flex items-center justify-between bg-slate-50 dark:bg-slate-900/80">
+                <div class="flex items-center gap-2.5">
+                    <i data-lucide="cpu" class="w-5 h-5 text-sky-500 dark:text-sky-400"></i>
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-900 dark:text-white">ESP32 Arduino Firmware Sketch</h3>
+                        <p class="text-xs text-slate-500 dark:text-slate-400">Compatible with pins 18, 19, 21, 22, 23 @ 9600 baud</p>
+                    </div>
+                </div>
+                <button onclick="closeSketchModal()" class="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-200 dark:hover:bg-white/10 transition-colors cursor-pointer">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+
+            <div class="px-5 pt-3 bg-white dark:bg-slate-950/60 border-b border-slate-200 dark:border-white/10 flex items-center justify-between gap-2">
+                <div class="flex gap-2">
+                    <button id="tab-optimized" onclick="switchSketchTab('optimized')" class="px-3 py-2 text-xs font-semibold border-b-2 border-sky-500 dark:border-sky-400 text-sky-600 dark:text-sky-400 cursor-pointer">
+                        Zero-Latency Sketch
+                    </button>
+                    <button id="tab-original" onclick="switchSketchTab('original')" class="px-3 py-2 text-xs font-medium border-b-2 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer">
+                        Original Sketch
+                    </button>
+                </div>
+                <button onclick="copyActiveSketch()" class="mb-1.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-semibold bg-sky-50 hover:bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:hover:bg-sky-500/30 dark:text-sky-300 border border-sky-200 dark:border-sky-500/30 transition-colors cursor-pointer shadow-sm">
+                    <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+                    <span id="copySketchBtnText">Copy Code</span>
+                </button>
+            </div>
+
+            <div class="p-5 overflow-y-auto serial-scroll bg-slate-50 dark:bg-[#070A11] flex-1">
+                <p id="sketchNote" class="text-xs text-emerald-700 dark:text-emerald-400/90 bg-emerald-100 dark:bg-emerald-500/10 border border-emerald-300 dark:border-emerald-500/20 rounded-xl p-3 mb-3 shadow-sm">
+                    <strong>Why recommended:</strong> Uses <code>Serial.readStringUntil('\n')</code> instead of <code>Serial.readString()</code> for instantaneous toggling!
+                </p>
+                <pre id="sketchCodeBlock" class="font-mono text-xs text-slate-800 dark:text-slate-200 leading-relaxed overflow-x-auto"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const COLOR_PRESETS = [
+            { name: 'Cyan',    hex: '#06B6D4', rgb: '6, 182, 212' },
+            { name: 'Emerald', hex: '#10B981', rgb: '16, 185, 129' },
+            { name: 'Amber',   hex: '#F59E0B', rgb: '245, 158, 11' },
+            { name: 'Coral',   hex: '#F43F5E', rgb: '244, 63, 94' },
+            { name: 'Violet',  hex: '#8B5CF6', rgb: '139, 92, 246' }
+        ];
+
+        const leds = [
+            { id: 1, gpio: 18, label: 'Channel 01', isOn: false, colorIndex: 0 },
+            { id: 2, gpio: 19, label: 'Channel 02', isOn: false, colorIndex: 1 },
+            { id: 3, gpio: 21, label: 'Channel 03', isOn: false, colorIndex: 2 },
+            { id: 4, gpio: 22, label: 'Channel 04', isOn: false, colorIndex: 3 },
+            { id: 5, gpio: 23, label: 'Channel 05', isOn: false, colorIndex: 4 },
+            { id: 6, gpio: 15, label: 'Channel 06', isOn: false, colorIndex: 0 },
+            { id: 7, gpio: 2, label: 'Channel 07', isOn: false, colorIndex: 1 },
+            { id: 8, gpio: 4, label: 'Channel 08', isOn: false, colorIndex: 2 }
+        ];
+
+        let isDemoMode = true;
+        let serialPort = null;
+        let serialReader = null;
+        let serialWriter = null;
+        let keepReading = false;
+        let readBuffer = '';
+        let activePattern = null;
+        let patternInterval = null;
+        let patternStep = 0;
+        let patternDirection = 1;
+        let currentSketchTab = 'optimized';
+
+        const SKETCHES = {
+            optimized: `// Hardware: ESP32 DevKit V1\n// Optimized with readStringUntil('\\n') for instant zero-latency toggling\nint ledPins[] = {18, 19, 21, 22, 23, 15, 2, 4};\nString inputCommand;\n\nvoid setup() {\n    Serial.begin(9600);\n    Serial.setTimeout(50);\n    for (int i = 0; i < 8; i++) {\n        pinMode(ledPins[i], OUTPUT);\n        digitalWrite(ledPins[i], LOW);\n    }\n    Serial.println("ESP32 Ready. Enter commands (e.g., L1 ON, L3 OFF):");\n}\n\nvoid loop() {\n    if (Serial.available()) {\n        inputCommand = Serial.readStringUntil('\\n');\n        inputCommand.trim();\n        if (inputCommand.length() == 0) return;\n\n        if (inputCommand.startsWith("L")) {\n            int ledNumber = inputCommand.charAt(1) - '1';\n            String action = inputCommand.substring(3);\n            if (ledNumber >= 0 && ledNumber < 8) {\n                if (action == "ON") {\n                    digitalWrite(ledPins[ledNumber], HIGH);\n                    Serial.println("LED " + String(ledNumber + 1) + " turned ON");\n                } else if (action == "OFF") {\n                    digitalWrite(ledPins[ledNumber], LOW);\n                    Serial.println("LED " + String(ledNumber + 1) + " turned OFF");\n                }\n            }\n        }\n    }\n}`,
+            original: `// Hardware EPS32 devkit v1\nint ledPins[] = {18, 19, 21, 22, 23, 15, 2, 4};\nString inputCommand;\nvoid setup() {\n    Serial.begin(9600);\n    for (int i = 0; i < 8; i++) {\n        pinMode(ledPins[i], OUTPUT);\n        digitalWrite(ledPins[i], LOW);\n    }\n    Serial.println("Enter commands (e.g., L1 ON, L3 OFF):");\n}\nvoid loop() {\n    if (Serial.available()) {\n        inputCommand = Serial.readString();\n        inputCommand.trim();\n        if (inputCommand.startsWith("L")) {\n            int ledNumber = inputCommand.charAt(1) - '1';\n            String action = inputCommand.substring(3);\n            if (ledNumber >= 0 && ledNumber < 8) {\n                if (action == "ON") {\n                    digitalWrite(ledPins[ledNumber], HIGH);\n                    Serial.println("LED " + String(ledNumber + 1) + " turned ON");\n                } else if (action == "OFF") {\n                    digitalWrite(ledPins[ledNumber], LOW);\n                    Serial.println("LED " + String(ledNumber + 1) + " turned OFF");\n                }\n            }\n        }\n    }\n}`
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            renderLedCards();
+            updateAllVisualStates();
+            lucide.createIcons();
+
+            const supportBadge = document.getElementById('webSerialSupportBadge');
+            if ('serial' in navigator) {
+                supportBadge.textContent = 'WEB SERIAL API: READY';
+                supportBadge.className = 'hidden sm:inline text-emerald-600 dark:text-emerald-400/80';
+            } else {
+                supportBadge.textContent = 'WEB SERIAL API: UNSUPPORTED';
+                supportBadge.className = 'hidden sm:inline text-rose-600 dark:text-rose-400/80';
+            }
+
+            appendSerialLog('SYS', 'ESP32 Studio initialized.');
+        });
+
+        // Theme Toggle Logic
+        function toggleTheme() {
+            const html = document.documentElement;
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                localStorage.theme = 'light';
+            } else {
+                html.classList.add('dark');
+                localStorage.theme = 'dark';
+            }
+            updateAllVisualStates(); // Re-render correct JS colors
+        }
+
+        function renderLedCards() {
+            const grid = document.getElementById('ledCardsGrid');
+            grid.innerHTML = leds.map((led, idx) => {
+                const color = COLOR_PRESETS[led.colorIndex];
+                return `
+                <div id="led-card-${idx}" class="hw-card rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden group">
+                    <div id="led-top-bar-${idx}" class="absolute top-0 left-0 right-0 h-1 transition-all duration-300 opacity-30" style="background: ${color.hex};"></div>
+
+                    <div class="flex items-center justify-between z-10">
+                        <div>
+                            <span class="text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-slate-400">${led.label}</span>
+                            <h3 class="text-base font-bold text-slate-900 dark:text-white tracking-tight">LED ${led.id}</h3>
+                        </div>
+                        <span class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-950/90 border border-slate-200 dark:border-white/10 font-mono text-xs font-semibold text-slate-600 dark:text-slate-300">
+                            GPIO ${led.gpio}
+                        </span>
+                    </div>
+
+                    <div id="led-visual-${idx}" class="relative my-5 flex items-center justify-center h-36 cursor-pointer select-none" onclick="toggleLed(${idx})">
+                        <div id="led-halo-${idx}" class="led-ambient-halo absolute w-32 h-32 rounded-full pointer-events-none"></div>
+
+                        <svg viewBox="0 0 120 120" class="w-32 h-32 relative z-10 overflow-visible">
+                            <defs>
+                                <radialGradient id="domeGrad-${idx}" cx="42%" cy="35%" r="60%">
+                                    <stop id="dome-stop-1-${idx}" offset="0%" />
+                                    <stop id="dome-stop-2-${idx}" offset="65%" />
+                                    <stop id="dome-stop-3-${idx}" offset="100%" />
+                                </radialGradient>
+                            </defs>
+
+                            <g id="led-rays-${idx}" class="led-rays" stroke-width="2" stroke-linecap="round">
+                                <line x1="60" y1="8" x2="60" y2="17" />
+                                <line x1="25" y1="22" x2="32" y2="29" />
+                                <line x1="95" y1="22" x2="88" y2="29" />
+                                <line x1="12" y1="54" x2="21" y2="54" />
+                                <line x1="108" y1="54" x2="99" y2="54" />
+                            </g>
+
+                            <rect x="50" y="84" width="3.5" height="28" rx="1.5" class="fill-slate-400 dark:fill-[#64748B]"/>
+                            <rect x="66.5" y="84" width="3.5" height="24" rx="1.5" class="fill-slate-500 dark:fill-[#475569]"/>
+                            <rect x="35" y="77" width="50" height="8" rx="4" class="fill-slate-300 dark:fill-[#1E293B] stroke-black/5 dark:stroke-white/10" stroke-width="1"/>
+
+                            <path id="led-dome-${idx}" class="led-dome"
+                                d="M39 77 V50 C39 36, 48 26, 60 26 C72 26, 81 36, 81 50 V77 Z"
+                                fill="url(#domeGrad-${idx})" stroke-width="1.2"/>
+
+                            <path d="M51.5 77 V58 L56 54 H64 L68.5 58 V77" fill="none" stroke-width="1.5" class="stroke-slate-400 dark:stroke-[#94A3B8]" opacity="0.6"/>
+
+                            <rect id="led-die-${idx}" class="led-die" x="55" y="49" width="10" height="7" rx="2" class="fill-slate-400 dark:fill-[#334155]"/>
+                            <circle id="led-core-${idx}" class="led-inner-core" cx="60" cy="52.5" r="3" fill="#FFFFFF" opacity="0"/>
+                            <path d="M45 48 C45 38, 51 32, 57 31" fill="none" stroke-width="2.2" stroke-linecap="round" class="stroke-white/80 dark:stroke-white/45"/>
+                        </svg>
+                    </div>
+
+                    <div class="flex items-center justify-center gap-2 mb-4 z-10">
+                        ${COLOR_PRESETS.map((preset, cIdx) => `
+                            <button type="button" onclick="setLedColor(${idx}, ${cIdx})"
+                                title="${preset.name}"
+                                class="w-4 h-4 rounded-full transition-transform cursor-pointer shadow-sm ${led.colorIndex === cIdx ? 'scale-125 ring-2 ring-slate-800 dark:ring-white ring-offset-2 ring-offset-white dark:ring-offset-[#111827]' : 'opacity-65 hover:opacity-100 hover:scale-110'}"
+                                style="background-color: ${preset.hex};">
+                            </button>
+                        `).join('')}
+                    </div>
+
+                    <div class="pt-3 border-t border-black/5 dark:border-white/[0.07] flex items-center justify-between z-10 transition-colors">
+                        <div class="flex items-center gap-2">
+                            <span id="led-status-dot-${idx}" class="w-2 h-2 rounded-full transition-colors"></span>
+                            <span id="led-status-text-${idx}" class="font-mono text-xs font-bold tracking-wider transition-colors">OFF</span>
+                        </div>
+
+                        <button id="led-toggle-${idx}" type="button" role="switch" aria-checked="${led.isOn}" onclick="toggleLed(${idx})" class="toggle-track">
+                            <span class="toggle-thumb"></span>
+                        </button>
+                    </div>
+                </div>
+                `;
+            }).join('');
+        }
+
+        function updateAllVisualStates() {
+            let activeCount = 0;
+            const isDark = document.documentElement.classList.contains('dark');
+
+            leds.forEach((led, idx) => {
+                if (led.isOn) activeCount++;
+                const color = COLOR_PRESETS[led.colorIndex];
+
+                const card = document.getElementById(`led-card-${idx}`);
+                const topBar = document.getElementById(`led-top-bar-${idx}`);
+                const visual = document.getElementById(`led-visual-${idx}`);
+                const halo = document.getElementById(`led-halo-${idx}`);
+                const rays = document.getElementById(`led-rays-${idx}`);
+                const dome = document.getElementById(`led-dome-${idx}`);
+                const stop1 = document.getElementById(`dome-stop-1-${idx}`);
+                const stop2 = document.getElementById(`dome-stop-2-${idx}`);
+                const stop3 = document.getElementById(`dome-stop-3-${idx}`);
+                const die = document.getElementById(`led-die-${idx}`);
+                const core = document.getElementById(`led-core-${idx}`);
+                const statusDot = document.getElementById(`led-status-dot-${idx}`);
+                const statusText = document.getElementById(`led-status-text-${idx}`);
+                const toggleBtn = document.getElementById(`led-toggle-${idx}`);
+
+                const pinDot = document.getElementById(`pin-dot-${idx}`);
+                const pinLabel = document.getElementById(`pin-label-${idx}`);
+
+                halo.style.background = `radial-gradient(circle, rgba(${color.rgb}, ${isDark ? 0.65 : 0.4}) 0%, rgba(${color.rgb}, ${isDark ? 0.22 : 0.1}) 48%, transparent 74%)`;
+                rays.setAttribute('stroke', color.hex);
+                topBar.style.background = color.hex;
+
+                if (led.isOn) {
+                    card.style.borderColor = `rgba(${color.rgb}, ${isDark ? 0.55 : 0.3})`;
+                    card.style.boxShadow = `0 12px 35px -10px rgba(${color.rgb}, ${isDark ? 0.32 : 0.2}), inset 0 1px 0 0 rgba(255, 255, 255, ${isDark ? 0.15 : 1})`;
+                    topBar.style.opacity = '1';
+
+                    visual.classList.add('led-active');
+                    stop1.setAttribute('stop-color', '#FFFFFF');
+                    stop1.setAttribute('stop-opacity', '0.95');
+                    stop2.setAttribute('stop-color', color.hex);
+                    stop2.setAttribute('stop-opacity', '0.88');
+                    stop3.setAttribute('stop-color', color.hex);
+                    stop3.setAttribute('stop-opacity', isDark ? '0.95' : '0.7');
+                    dome.setAttribute('stroke', color.hex);
+                    dome.style.filter = `drop-shadow(0 0 10px rgba(${color.rgb}, 0.85))`;
+
+                    die.style.fill = '#FFFFFF';
+                    core.setAttribute('opacity', '1');
+
+                    toggleBtn.classList.add('active');
+                    toggleBtn.setAttribute('aria-checked', 'true');
+                    toggleBtn.style.backgroundColor = `rgba(${color.rgb}, ${isDark ? 0.35 : 0.15})`;
+                    toggleBtn.style.borderColor = color.hex;
+                    toggleBtn.style.boxShadow = `0 0 14px rgba(${color.rgb}, 0.45), inset 0 1px 4px rgba(0,0,0,0.2)`;
+
+                    statusDot.style.backgroundColor = color.hex;
+                    statusDot.style.boxShadow = `0 0 8px ${color.hex}`;
+                    statusText.textContent = 'ON';
+                    statusText.style.color = isDark ? '#FFFFFF' : '#0F172A';
+
+                    if (pinDot && pinLabel) {
+                        pinDot.style.fill = color.hex;
+                        pinDot.style.stroke = isDark ? '#FFFFFF' : '#0F172A';
+                        pinDot.style.filter = `drop-shadow(0 0 6px ${color.hex})`;
+                        pinLabel.style.fill = color.hex;
+                    }
+                } else {
+                    card.style.borderColor = '';
+                    card.style.boxShadow = '';
+                    topBar.style.opacity = '0.25';
+
+                    visual.classList.remove('led-active');
+                    stop1.setAttribute('stop-color', color.hex);
+                    stop1.setAttribute('stop-opacity', isDark ? '0.22' : '0.1');
+                    stop2.setAttribute('stop-color', isDark ? '#1E293B' : '#E2E8F0');
+                    stop2.setAttribute('stop-opacity', '0.75');
+                    stop3.setAttribute('stop-color', isDark ? '#0F172A' : '#F8FAFC');
+                    stop3.setAttribute('stop-opacity', '0.9');
+                    dome.setAttribute('stroke', isDark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.06)');
+                    dome.style.filter = 'none';
+
+                    die.style.fill = ''; 
+                    core.setAttribute('opacity', '0');
+
+                    toggleBtn.classList.remove('active');
+                    toggleBtn.setAttribute('aria-checked', 'false');
+                    toggleBtn.style.backgroundColor = '';
+                    toggleBtn.style.borderColor = '';
+                    toggleBtn.style.boxShadow = '';
+
+                    statusDot.style.backgroundColor = isDark ? '#475569' : '#CBD5E1';
+                    statusDot.style.boxShadow = 'none';
+                    statusText.textContent = 'OFF';
+                    statusText.style.color = isDark ? '#94A3B8' : '#64748B';
+
+                    if (pinDot && pinLabel) {
+                        pinDot.style.fill = '';
+                        pinDot.style.stroke = '';
+                        pinDot.style.filter = 'none';
+                        pinLabel.style.fill = '';
+                    }
+                }
+            });
+
+            document.getElementById('activeCountLabel').textContent = `${activeCount} / 8`;
+        }
+
+        // Logic & API Below Unchanged
+        function toggleLed(index, fromPattern = false) {
+            if (!fromPattern && activePattern) stopPattern();
+            setLedState(index, !leds[index].isOn);
+        }
+
+        function setLedState(index, state) {
+            if (leds[index].isOn === state) return;
+            leds[index].isOn = state;
+            updateAllVisualStates();
+            sendSerialCommand(`L${leds[index].id} ${state ? 'ON' : 'OFF'}`);
+        }
+
+        function setLedColor(ledIndex, colorIndex) {
+            leds[ledIndex].colorIndex = colorIndex;
+            renderLedCards();
+            updateAllVisualStates();
+        }
+
+        function setAllLeds(state) {
+            if (activePattern) stopPattern();
+            leds.forEach(led => {
+                if (led.isOn !== state) {
+                    led.isOn = state;
+                    sendSerialCommand(`L${led.id} ${state ? 'ON' : 'OFF'}`);
+                }
+            });
+            updateAllVisualStates();
+        }
+
+        function togglePattern(patternName) {
+            if (activePattern === patternName) return stopPattern();
+            stopPattern();
+            activePattern = patternName;
+            patternStep = 0; patternDirection = 1;
+            document.getElementById(`pattern-${patternName}`).classList.add('pattern-active');
+            runPatternTick();
+            const speed = patternName === 'knight' ? 220 : patternName === 'pulse' ? 450 : 280;
+            patternInterval = setInterval(runPatternTick, speed);
+        }
+
+        function stopPattern() {
+            if (patternInterval) clearInterval(patternInterval);
+            patternInterval = null;
+            if (activePattern) {
+                const btn = document.getElementById(`pattern-${activePattern}`);
+                if (btn) btn.classList.remove('pattern-active');
+                activePattern = null;
+            }
+        }
+
+        function runPatternTick() {
+            if (activePattern === 'knight') {
+                leds.forEach((led, idx) => {
+                    const shouldBeOn = idx === patternStep;
+                    if (led.isOn !== shouldBeOn) { led.isOn = shouldBeOn; sendSerialCommand(`L${led.id} ${shouldBeOn ? 'ON' : 'OFF'}`); }
+                });
+                updateAllVisualStates();
+                patternStep += patternDirection;
+                if (patternStep >= leds.length - 1) { patternStep = 4; patternDirection = -1; } 
+                else if (patternStep <= 0) { patternStep = 0; patternDirection = 1; }
+            } else if (activePattern === 'pulse') {
+                const phase = patternStep % 2 === 0;
+                leds.forEach((led, idx) => {
+                    const shouldBeOn = (idx % 2 === 0) ? phase : !phase;
+                    if (led.isOn !== shouldBeOn) { led.isOn = shouldBeOn; sendSerialCommand(`L${led.id} ${shouldBeOn ? 'ON' : 'OFF'}`); }
+                });
+                updateAllVisualStates();
+                patternStep++;
+            } else if (activePattern === 'sparkle') {
+                const randomIdx = Math.floor(Math.random() * leds.length);
+                const newState = !leds[randomIdx].isOn;
+                leds[randomIdx].isOn = newState;
+                sendSerialCommand(`L${leds[randomIdx].id} ${newState ? 'ON' : 'OFF'}`);
+                updateAllVisualStates();
+            }
+        }
+
+        function toggleDemoMode() {
+            if (!isDemoMode && serialPort) disconnectUsb();
+            isDemoMode = !isDemoMode;
+            updateConnectionHeaderUI();
+            if (isDemoMode) showToast('Demo Mode enabled.', 'info');
+        }
+
+        async function handleUsbConnectionClick() { serialPort ? await disconnectUsb() : await connectUsb(); }
+
+        async function connectUsb() {
+            if (!('serial' in navigator)) return showToast('Web Serial API unsupported.', 'error');
+            try {
+                serialPort = await navigator.serial.requestPort();
+                await serialPort.open({ baudRate: 9600 });
+                isDemoMode = false;
+                updateConnectionHeaderUI();
+                showToast('Connected to ESP32!', 'success');
+                const textEncoder = new TextEncoderStream();
+                textEncoder.readable.pipeTo(serialPort.writable);
+                serialWriter = textEncoder.writable.getWriter();
+                keepReading = true;
+                readSerialLoop();
+                serialPort.addEventListener('disconnect', () => { showToast('ESP32 disconnected.', 'error'); cleanupSerialResources(); });
+            } catch (err) { serialPort = null; if (err.name !== 'NotFoundError') showToast(`Connection failed: ${err.message}`, 'error'); }
+        }
+
+        async function readSerialLoop() {
+            const textDecoder = new TextDecoderStream();
+            serialPort.readable.pipeTo(textDecoder.writable);
+            serialReader = textDecoder.readable.getReader();
+            try {
+                while (keepReading) {
+                    const { value, done } = await serialReader.read();
+                    if (done) break;
+                    if (value) {
+                        flashBoardActivityLed();
+                        readBuffer += value;
+                        const lines = readBuffer.split(/\r?\n/);
+                        readBuffer = lines.pop();
+                        for (const line of lines) if (line.trim()) appendSerialLog('RX', line.trim());
+                    }
+                }
+            } catch (error) {} finally { serialReader.releaseLock(); }
+        }
+
+        async function disconnectUsb() { stopPattern(); await cleanupSerialResources(); showToast('Disconnected from ESP32.', 'info'); }
+
+        async function cleanupSerialResources() {
+            keepReading = false;
+            try {
+                if (serialReader) await serialReader.cancel(); serialReader = null;
+                if (serialWriter) await serialWriter.close(); serialWriter = null;
+                if (serialPort) await serialPort.close(); serialPort = null;
+            } catch (e) {}
+            updateConnectionHeaderUI();
+        }
+
+        async function sendSerialCommand(command) {
+            const cleanCmd = command.trim();
+            if (!cleanCmd) return;
+            flashBoardActivityLed();
+            appendSerialLog('TX', cleanCmd);
+            if (serialPort && serialWriter) {
+                try { await serialWriter.write(cleanCmd + '\n'); } catch (err) { appendSerialLog('ERR', err.message); }
+            } else if (isDemoMode) {
+                setTimeout(() => simulateEsp32FirmwareResponse(cleanCmd), 35);
+            }
+        }
+
+        function simulateEsp32FirmwareResponse(inputCommand) {
+            flashBoardActivityLed();
+            if (inputCommand.startsWith('L')) {
+                const ledNumber = inputCommand.charCodeAt(1) - '1'.charCodeAt(0);
+                const action = inputCommand.substring(3);
+                if (ledNumber >= 0 && ledNumber < 8) {
+                    if (action === 'ON') {
+                        if (!leds[ledNumber].isOn) { leds[ledNumber].isOn = true; updateAllVisualStates(); }
+                        appendSerialLog('RX', `LED ${ledNumber + 1} turned ON`);
+                    } else if (action === 'OFF') {
+                        if (leds[ledNumber].isOn) { leds[ledNumber].isOn = false; updateAllVisualStates(); }
+                        appendSerialLog('RX', `LED ${ledNumber + 1} turned OFF`);
+                    }
+                }
+            }
+        }
+
+        function handleManualCommandSubmit(e) {
+            e.preventDefault();
+            const val = document.getElementById('manualSerialInput').value.trim();
+            if (!val) return;
+            if (val.startsWith('L') && val.length >= 5) {
+                const idx = parseInt(val.charAt(1), 10) - 1;
+                const action = val.substring(3).toUpperCase();
+                if (idx >= 0 && idx < leds.length && (action === 'ON' || action === 'OFF')) {
+                    if (activePattern) stopPattern();
+                    leds[idx].isOn = (action === 'ON');
+                    updateAllVisualStates();
+                }
+            }
+            sendSerialCommand(val);
+            document.getElementById('manualSerialInput').value = '';
+        }
+
+        function updateConnectionHeaderUI() {
+            const connectBtn = document.getElementById('connectUsbBtn');
+            const demoBtn = document.getElementById('demoModeBtn');
+            const badge = document.getElementById('connectionBadge');
+            
+            demoBtn.setAttribute('aria-checked', isDemoMode ? 'true' : 'false');
+            if (isDemoMode) {
+                demoBtn.classList.add('bg-amber-500'); demoBtn.classList.remove('bg-slate-300', 'dark:bg-slate-700');
+                document.getElementById('demoModeKnob').classList.add('translate-x-4');
+            } else {
+                demoBtn.classList.remove('bg-amber-500'); demoBtn.classList.add('bg-slate-300', 'dark:bg-slate-700');
+                document.getElementById('demoModeKnob').classList.remove('translate-x-4');
+            }
+
+            if (serialPort) {
+                document.getElementById('connectUsbText').textContent = 'Disconnect USB';
+                connectBtn.className = 'inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-rose-500 to-red-600 shadow-lg shadow-rose-500/25 border border-rose-400/30 transition-all cursor-pointer active:scale-[0.98]';
+                badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 dark:bg-emerald-400 animate-pulse"></span> <span class="text-emerald-700 dark:text-emerald-400">USB CONNECTED</span>`;
+            } else if (isDemoMode) {
+                document.getElementById('connectUsbText').textContent = 'Connect USB (ESP32)';
+                connectBtn.className = 'inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-sky-500 to-blue-600 shadow-lg shadow-sky-500/25 border border-sky-400/30 transition-all cursor-pointer active:scale-[0.98]';
+                badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-amber-500 dark:bg-amber-400 animate-pulse"></span> <span class="text-amber-600 dark:text-amber-400">SIMULATION MODE ACTIVE</span>`;
+            } else {
+                badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-slate-400 dark:bg-slate-500"></span> <span class="text-slate-500 dark:text-slate-400">DISCONNECTED</span>`;
+            }
+        }
+
+        function appendSerialLog(direction, message) {
+            const container = document.getElementById('serialConsoleOutput');
+            const timeStr = new Date().toTimeString().split(' ')[0] + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+            const isDark = document.documentElement.classList.contains('dark');
+
+            let badgeHtml = ''; let msgClass = isDark ? 'text-slate-300' : 'text-slate-600';
+            if (direction === 'TX') {
+                badgeHtml = `<span class="px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-500/15 text-sky-700 dark:text-sky-400 font-bold">TX -&gt;</span>`;
+                msgClass = 'text-sky-800 dark:text-sky-200 font-medium';
+            } else if (direction === 'RX') {
+                badgeHtml = `<span class="px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-bold">RX &lt;-</span>`;
+                msgClass = 'text-emerald-700 dark:text-emerald-300';
+            } else if (direction === 'ERR') {
+                badgeHtml = `<span class="px-1.5 py-0.5 rounded bg-rose-100 dark:bg-rose-500/15 text-rose-700 dark:text-rose-400 font-bold">ERROR</span>`;
+                msgClass = 'text-rose-700 dark:text-rose-300';
+            } else {
+                badgeHtml = `<span class="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-400 font-bold">INFO </span>`;
+            }
+
+            const row = document.createElement('div'); row.className = 'flex items-start gap-2 leading-relaxed';
+            row.innerHTML = `<span class="text-slate-400 dark:text-slate-600 shrink-0 select-none">[${timeStr}]</span><span class="shrink-0 select-none">${badgeHtml}</span><span class="${msgClass} break-all">${message.replace(/</g, '&lt;')}</span>`;
+            container.appendChild(row);
+            while (container.children.length > 120) container.removeChild(container.firstChild);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearSerialLogs() { document.getElementById('serialConsoleOutput').innerHTML = ''; appendSerialLog('SYS', 'Cleared.'); }
+
+        function flashBoardActivityLed() {
+            const led = document.getElementById('boardTxLed');
+            if (!led) return;
+            const isDark = document.documentElement.classList.contains('dark');
+            led.style.fill = '#38BDF8';
+            setTimeout(() => { led.style.fill = ''; }, 90);
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            const colors = {
+                success: 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-slate-900/95 dark:text-emerald-200',
+                error: 'border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-500/40 dark:bg-slate-900/95 dark:text-rose-200',
+                info: 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-500/40 dark:bg-slate-900/95 dark:text-sky-200'
+            };
+            toast.className = `pointer-events-auto px-4 py-3 rounded-xl border ${colors[type] || colors.info} backdrop-blur-xl shadow-2xl text-xs font-medium flex items-center gap-3 transition-all duration-300 transform translate-y-2 opacity-0`;
+            toast.innerHTML = `<span>${message}</span>`;
+            container.appendChild(toast);
+            requestAnimationFrame(() => toast.classList.remove('translate-y-2', 'opacity-0'));
+            setTimeout(() => { toast.classList.add('opacity-0', 'translate-y-2'); setTimeout(() => toast.remove(), 300); }, 3400);
+        }
+
+        function openSketchModal() { document.getElementById('sketchModal').classList.replace('hidden', 'flex'); switchSketchTab(currentSketchTab); }
+        function closeSketchModal() { document.getElementById('sketchModal').classList.replace('flex', 'hidden'); }
+
+        function switchSketchTab(tab) {
+            currentSketchTab = tab;
+            const opt = document.getElementById('tab-optimized'); const orig = document.getElementById('tab-original');
+            const activeClass = 'px-3 py-2 text-xs font-semibold border-b-2 border-sky-500 dark:border-sky-400 text-sky-600 dark:text-sky-400 cursor-pointer';
+            const idleClass = 'px-3 py-2 text-xs font-medium border-b-2 border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 cursor-pointer';
+            
+            if (tab === 'optimized') { opt.className = activeClass; orig.className = idleClass; document.getElementById('sketchNote').classList.remove('hidden'); }
+            else { orig.className = activeClass; opt.className = idleClass; document.getElementById('sketchNote').classList.add('hidden'); }
+            document.getElementById('sketchCodeBlock').textContent = SKETCHES[tab];
+        }
+
+        function copyActiveSketch() {
+            navigator.clipboard.writeText(SKETCHES[currentSketchTab]);
+            document.getElementById('copySketchBtnText').textContent = 'Copied!';
+            showToast('Sketch copied!', 'success');
+            setTimeout(() => document.getElementById('copySketchBtnText').textContent = 'Copy Code', 2000);
+        }
+    </script>
+</body>
+</html>
